@@ -1,6 +1,6 @@
 use std::{
     fs::{self, File},
-    io::{BufRead, BufReader, Read},
+    io::{BufRead, BufReader, BufWriter, Read, Write},
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -56,7 +56,7 @@ struct Image {
 impl Image {
     fn from_file_path(path: String) -> Result<Self, &'static str> {
         //TODO: skip comments in the header
-        let f = File::open(path).map_err(|_| "Failed while opening the file")?;
+        let file = File::open(path).map_err(|_| "Failed while opening the file")?;
 
         let mut width: u32 = 0;
         let mut height: u32 = 0;
@@ -64,11 +64,11 @@ impl Image {
         let mut parser_stt = PpmParserStt::MagicNumber;
         let mut magic_number = PpmMagicNumber::P3;
 
-        let reader = BufReader::new(f);
+        let reader = BufReader::new(file);
         let mut bytes_iter = reader.bytes();
 
         let mut next_word = || -> Result<String, &'static str> {
-            let mut word = String::new();
+            let mut word = String::with_capacity(3);
 
             // skip leading whitespace
             for byte in &mut bytes_iter {
@@ -131,43 +131,74 @@ impl Image {
             pixels: Vec::with_capacity((width * height) as usize),
         };
 
-        let mut crr_pixel_idx: usize = 0;
+        let mut current_r = 0;
+        let mut current_g = 0;
 
-        if magic_number == PpmMagicNumber::P6 {
-            // P6 BINARY PARSING
-            // You can just loop over `bytes_iter` here. Every 3 bytes = 1 Pixel!
-            // Example: let r = bytes_iter.next().unwrap().unwrap();
-        } else {
-            // P3 parsing
-            let mut current_r = 0;
-            let mut current_g = 0;
-
-            while let Ok(value) = next_word() {
-                if value.is_empty() {
-                    // EOF!
-                    break;
+        let mut save_pixel = |value: u8| {
+            match parser_stt {
+                PpmParserStt::Pixels(PixelColor::Red) => current_r = value,
+                PpmParserStt::Pixels(PixelColor::Green) => current_g = value,
+                PpmParserStt::Pixels(PixelColor::Blue) => {
+                    img.pixels.push(Pixel {
+                        r: current_r,
+                        g: current_g,
+                        b: value,
+                    });
                 }
+                _ => unreachable!(),
+            }
+            parser_stt.advance();
+        };
 
-                let value = value
-                    .parse::<u8>()
-                    .map_err(|_| "Error while trying to parse pixel color value")?;
-                match parser_stt {
-                    PpmParserStt::Pixels(PixelColor::Red) => current_r = value,
-                    PpmParserStt::Pixels(PixelColor::Green) => current_g = value,
-                    PpmParserStt::Pixels(PixelColor::Blue) => {
-                        img.pixels.push(Pixel {
-                            r: current_r,
-                            g: current_g,
-                            b: value,
-                        });
+        match magic_number {
+            PpmMagicNumber::P3 => {
+                while let Ok(value) = next_word() {
+                    if value.is_empty() {
+                        // EOF!
+                        break;
                     }
-                    _ => unreachable!(),
+
+                    let value = value
+                        .parse::<u8>()
+                        .map_err(|_| "Error while trying to parse pixel color value")?;
+
+                    save_pixel(value);
                 }
-                parser_stt.advance();
+            }
+            PpmMagicNumber::P6 => {
+                while let Some(Ok(value)) = bytes_iter.next() {
+                    save_pixel(value);
+                }
             }
         }
 
         Ok(img)
+    }
+
+    ///Saves the image to the desired location as a P6 .ppm file
+    fn save_to_file(&self, path: String) -> Result<(), &'static str> {
+        let file = File::create(path).map_err(|_| "Failed to create output file")?;
+
+        let mut writer = BufWriter::new(file);
+
+        writeln!(writer, "P6").map_err(|_| "Failed to write magic number")?;
+        writeln!(writer, "{} {}", self.width, self.height)
+            .map_err(|_| "Failed to write dimensions")?;
+        writeln!(writer, "255").map_err(|_| "Failed to write max color")?;
+
+        let mut flat_pixels = Vec::with_capacity(self.pixels.len() * 3);
+
+        self.pixels.iter().for_each(|p| {
+            flat_pixels.push(p.r);
+            flat_pixels.push(p.g);
+            flat_pixels.push(p.b);
+        });
+
+        writer
+            .write_all(&flat_pixels)
+            .map_err(|_| "Failed to write pixel data")?;
+
+        Ok(())
     }
 
     #[inline]
@@ -190,8 +221,7 @@ impl Image {
 }
 
 fn main() {
-    dbg!(
-        "{}",
-        Image::from_file_path("example_images/pallete.ppm".into()).unwrap()
-    );
+    let img = Image::from_file_path("example_images/hk.ppm".into()).unwrap();
+    dbg!("{}", &img);
+    img.save_to_file("./test.ppm".into()).unwrap();
 }
