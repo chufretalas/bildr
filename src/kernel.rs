@@ -1,3 +1,20 @@
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum KernelError {
+    #[error("Dimension mismatch: expected {expected} weights (width * height), but got {actual}")]
+    DimensionMismatch { expected: usize, actual: usize },
+
+    #[error("IO Error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("Failed to parse kernel scaling factor: {0}")]
+    ParseScalingFactor(#[source] std::num::ParseFloatError),
+
+    #[error("Failed to parse kernel weight value: {0}")]
+    ParseWeight(#[source] std::num::ParseFloatError),
+}
+
 #[derive(Debug, Clone)]
 pub struct Kernel {
     scaling_factor: f32,
@@ -18,9 +35,12 @@ impl Kernel {
         width: u32,
         height: u32,
         weights: Vec<f32>,
-    ) -> Result<Self, &'static str> {
-        if width * height != weights.len() as u32 {
-            Err("The amount of weights does not match width and height")
+    ) -> Result<Self, KernelError> {
+        let expected = (width * height) as usize;
+        let actual = weights.len();
+
+        if expected != actual {
+            Err(KernelError::DimensionMismatch { expected, actual })
         } else {
             Ok(Self {
                 scaling_factor,
@@ -33,11 +53,7 @@ impl Kernel {
         }
     }
 
-    pub fn new_normalized(
-        width: u32,
-        height: u32,
-        weights: Vec<f32>,
-    ) -> Result<Self, &'static str> {
+    pub fn new_normalized(width: u32, height: u32, weights: Vec<f32>) -> Result<Self, KernelError> {
         let scaling_factor: f32 = {
             let sum: f32 = weights.iter().sum();
             if sum == 0.0 { 1.0 } else { 1.0 / sum }
@@ -77,7 +93,7 @@ impl Kernel {
     pub fn anchor_x(&self) -> u32 {
         self.anchor_x
     }
-    
+
     pub fn anchor_y(&self) -> u32 {
         self.anchor_y
     }

@@ -1,7 +1,29 @@
 use std::{
     fs::File,
-    io::{BufReader, BufWriter, Read, Write}
+    io::{BufReader, BufWriter, Read, Write},
 };
+
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum ImageError {
+    #[error("IO Error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("Failed to parse the {field}. The value '{value}' is invalid.")]
+    ParseInteger {
+        field: String,
+        value: String,
+        #[source]
+        source: std::num::ParseIntError,
+    },
+
+    #[error("Unsupported magic number found: {0}")]
+    UnsupportedMagicNumber(String),
+
+    #[error("Only 8-bit depth (255) is supported. Found: {0}")]
+    UnsupportedDepth(String),
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct Pixel {
@@ -86,9 +108,9 @@ impl Image {
         }
     }
 
-    pub fn from_file_path(path: String) -> Result<Self, &'static str> {
+    pub fn from_file_path(path: String) -> Result<Self, ImageError> {
         //TODO: skip comments in the header
-        let file = File::open(path).map_err(|_| "Failed while opening the file")?;
+        let file = File::open(path)?;
 
         let mut width: u32 = 0;
         let mut height: u32 = 0;
@@ -99,12 +121,12 @@ impl Image {
         let reader = BufReader::new(file);
         let mut bytes_iter = reader.bytes();
 
-        let mut next_word = || -> Result<String, &'static str> {
+        let mut next_word = || -> Result<String, ImageError> {
             let mut word = String::with_capacity(3);
 
             // skip leading whitespace
             for byte in &mut bytes_iter {
-                let byte = byte.map_err(|_| "IO error reading byte")?;
+                let byte = byte?;
                 if !byte.is_ascii_whitespace() {
                     word.push(byte as char);
                     break;
@@ -113,7 +135,7 @@ impl Image {
 
             // read until next whitespace
             for byte in &mut bytes_iter {
-                let byte = byte.map_err(|_| "IO error reading byte")?;
+                let byte = byte?;
                 if byte.is_ascii_whitespace() {
                     break;
                 }
@@ -134,21 +156,29 @@ impl Image {
                     match word.as_str() {
                         "P3" => magic_number = PpmMagicNumber::P3,
                         "P6" => magic_number = PpmMagicNumber::P6,
-                        _ => return Err("Unsupported magic number found"),
+                        _ => return Err(ImageError::UnsupportedMagicNumber(word)),
                     }
                     parser_stt.advance();
                 }
                 PpmParserStt::Width => {
-                    width = word.parse().map_err(|_| "Error parsing width")?;
+                    width = word.parse().map_err(|e| ImageError::ParseInteger {
+                        field: "width".to_string(),
+                        value: word.clone(), // We clone because `word` might be moved/used elsewhere
+                        source: e,
+                    })?;
                     parser_stt.advance();
                 }
                 PpmParserStt::Height => {
-                    height = word.parse().map_err(|_| "Error parsing height")?;
+                    height = word.parse().map_err(|e| ImageError::ParseInteger {
+                        field: "height".to_string(),
+                        value: word.clone(),
+                        source: e,
+                    })?;
                     parser_stt.advance();
                 }
                 PpmParserStt::MaxColor => {
                     if word != "255" {
-                        return Err("Only 8-bit depth (255) is supported");
+                        return Err(ImageError::UnsupportedDepth(word));
                     }
                     parser_stt.advance();
                 }
@@ -190,9 +220,11 @@ impl Image {
                         break;
                     }
 
-                    let value = value
-                        .parse::<u8>()
-                        .map_err(|_| "Error while trying to parse pixel color value")?;
+                    let value = value.parse::<u8>().map_err(|e| ImageError::ParseInteger {
+                        field: "pixel".to_string(),
+                        value: value.clone(),
+                        source: e,
+                    })?;
 
                     save_pixel(value);
                 }
@@ -208,15 +240,13 @@ impl Image {
     }
 
     ///Saves the image to the desired location as a P6 .ppm file
-    pub fn save_to_file(&self, path: String) -> Result<(), &'static str> {
-        let file = File::create(path).map_err(|_| "Failed to create output file")?;
-
+    pub fn save_to_file(&self, path: String) -> Result<(), ImageError> {
+        let file = File::create(path)?;
         let mut writer = BufWriter::new(file);
 
-        writeln!(writer, "P6").map_err(|_| "Failed to write magic number")?;
-        writeln!(writer, "{} {}", self.width, self.height)
-            .map_err(|_| "Failed to write dimensions")?;
-        writeln!(writer, "255").map_err(|_| "Failed to write max color")?;
+        writeln!(writer, "P6")?;
+        writeln!(writer, "{} {}", self.width, self.height)?;
+        writeln!(writer, "255")?;
 
         let mut flat_pixels = Vec::with_capacity(self.pixels.len() * 3);
 
@@ -226,9 +256,7 @@ impl Image {
             flat_pixels.push(p.b);
         });
 
-        writer
-            .write_all(&flat_pixels)
-            .map_err(|_| "Failed to write pixel data")?;
+        writer.write_all(&flat_pixels)?;
 
         Ok(())
     }
