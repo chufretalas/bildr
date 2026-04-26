@@ -1,6 +1,6 @@
 use std::{
     fs::File,
-    io::{BufReader, BufWriter, Read, Write},
+    io::{BufReader, BufWriter, Read, Write}
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -8,6 +8,30 @@ pub struct Pixel {
     r: u8,
     g: u8,
     b: u8,
+}
+
+impl Pixel {
+    pub fn black() -> Self {
+        Pixel { r: 0, g: 0, b: 0 }
+    }
+
+    pub fn r(&self) -> u8 {
+        return self.r;
+    }
+
+    pub fn g(&self) -> u8 {
+        return self.g;
+    }
+
+    pub fn b(&self) -> u8 {
+        return self.b;
+    }
+
+    pub fn set_rgb(&mut self, r: u8, g: u8, b: u8) {
+        self.r = r;
+        self.g = g;
+        self.b = b;
+    }
 }
 
 #[derive(PartialEq, Eq)]
@@ -54,6 +78,14 @@ pub struct Image {
 }
 
 impl Image {
+    pub fn empty(width: u32, height: u32) -> Self {
+        Image {
+            width,
+            height,
+            pixels: vec![Pixel { r: 0, g: 0, b: 0 }; (width * height) as usize],
+        }
+    }
+
     pub fn from_file_path(path: String) -> Result<Self, &'static str> {
         //TODO: skip comments in the header
         let file = File::open(path).map_err(|_| "Failed while opening the file")?;
@@ -202,20 +234,28 @@ impl Image {
     }
 
     #[inline]
-    pub fn get_pixel(&self, x: u32, y: u32) -> Option<Pixel> {
-        if x >= self.width || y >= self.height {
+    pub fn get_pixel(&self, x: i32, y: i32) -> Option<Pixel> {
+        if x < 0 || x >= self.width as i32 || y < 0 || y >= self.height as i32 {
             None
         } else {
-            Some(self.pixels[(y * self.width + x) as usize])
+            Some(self.pixels[(y * self.width as i32 + x) as usize])
         }
     }
 
     #[inline]
-    pub fn get_pixel_mut(&mut self, x: u32, y: u32) -> Option<&mut Pixel> {
-        if x >= self.width || y >= self.height {
+    pub fn get_pixel_mut(&mut self, x: i32, y: i32) -> Option<&mut Pixel> {
+        if x < 0 || x >= self.width as i32 || y < 0 || y >= self.height as i32 {
             None
         } else {
-            Some(&mut self.pixels[(y * self.width + x) as usize])
+            Some(&mut self.pixels[(y * self.width as i32 + x) as usize])
         }
+    }
+
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    pub fn height(&self) -> u32 {
+        self.height
     }
 }

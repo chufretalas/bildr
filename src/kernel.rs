@@ -12,7 +12,7 @@ pub struct Kernel {
 
 impl Kernel {
     // TODO add a Kernel::from_file
-    
+
     pub fn new(
         scaling_factor: f32,
         width: u32,
@@ -33,14 +33,14 @@ impl Kernel {
         }
     }
 
-    pub fn new_normalized(width: u32, height: u32, weights: Vec<f32>) -> Result<Self, &'static str> {
+    pub fn new_normalized(
+        width: u32,
+        height: u32,
+        weights: Vec<f32>,
+    ) -> Result<Self, &'static str> {
         let scaling_factor: f32 = {
             let sum: f32 = weights.iter().sum();
-            if sum == 0.0 {
-                1.0
-            } else {
-                1.0 / sum
-            }
+            if sum == 0.0 { 1.0 } else { 1.0 / sum }
         };
         Self::new(scaling_factor, width, height, weights)
     }
@@ -60,5 +60,25 @@ impl Kernel {
         }
 
         Some(self.weights[absolute_y as usize * (self.width as usize) + absolute_x as usize])
+    }
+
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+
+    pub fn scaling_factor(&self) -> f32 {
+        self.scaling_factor
+    }
+
+    pub fn anchor_x(&self) -> u32 {
+        self.anchor_x
+    }
+    
+    pub fn anchor_y(&self) -> u32 {
+        self.anchor_y
     }
 }
