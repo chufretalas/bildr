@@ -98,3 +98,69 @@ impl Kernel {
         self.anchor_y
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_kernel_creations() {
+        let cases = [
+            (3, 3, 1, 1), // Square odd
+            (3, 5, 1, 2), // Rectangle odd
+            (6, 6, 3, 3), // Square even
+            (6, 8, 3, 4), // Rectangle even
+        ];
+
+        for (w, h, ax, ay) in cases {
+            let len = (w * h) as usize;
+            let kernel = Kernel::new(1.0, w, h, vec![1.0; len]).unwrap();
+
+            // We add the `"{w}x{h}"` context so we know which iteration panicked!
+            assert_eq!(kernel.width(), w, "Width failed for {}x{}", w, h);
+            assert_eq!(kernel.height(), h, "Height failed for {}x{}", w, h);
+            assert_eq!(kernel.anchor_x(), ax, "Anchor X failed for {}x{}", w, h);
+            assert_eq!(kernel.anchor_y(), ay, "Anchor Y failed for {}x{}", w, h);
+        }
+    }
+
+    #[test]
+    fn test_kernel_normalization() {
+        let weights = vec![1.0, 2.0, 1.0, 2.0, 4.0, 2.0, 1.0, 2.0, 1.0];
+        let kernel = Kernel::new_normalized(3, 3, weights).unwrap();
+
+        // The sum of the weights is 16.0, so the scaling factor should be 1.0 / 16.0
+        assert_eq!(kernel.scaling_factor(), 1.0 / 16.0);
+    }
+
+    #[test]
+    fn test_kernel_dimension_mismatch() {
+        let result = Kernel::new(1.0, 3, 3, vec![1.0; 4]);
+
+        assert!(result.is_err());
+
+        let err = result.unwrap_err();
+
+        assert!(
+            matches!(
+                err,
+                KernelError::DimensionMismatch {
+                    expected: 9,
+                    actual: 4
+                }
+            ),
+            "Expected KernelError::DimensionMismatch, but got {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_kernel_get_weight_out_of_bounds() {
+        let kernel = Kernel::new(1.0, 3, 3, vec![1.0; 9]).unwrap();
+
+        assert_eq!(kernel.get_weight(0, 0), Some(1.0));
+
+        assert_eq!(kernel.get_weight(10, 10), None);
+        assert_eq!(kernel.get_weight(-5, 0), None);
+    }
+}

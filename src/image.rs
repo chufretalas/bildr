@@ -25,7 +25,7 @@ pub enum ImageError {
     UnsupportedDepth(String),
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Pixel {
     r: u8,
     g: u8,
@@ -34,7 +34,11 @@ pub struct Pixel {
 
 impl Pixel {
     pub fn black() -> Self {
-        Pixel { r: 0, g: 0, b: 0 }
+        Self::from_rgb(0, 0, 0)
+    }
+
+    pub fn from_rgb(r: u8, g: u8, b: u8) -> Self {
+        Self { r, g, b }
     }
 
     pub fn r(&self) -> u8 {
@@ -104,7 +108,7 @@ impl Image {
         Image {
             width,
             height,
-            pixels: vec![Pixel { r: 0, g: 0, b: 0 }; (width * height) as usize],
+            pixels: vec![Pixel::black(); (width * height) as usize],
         }
     }
 
@@ -285,5 +289,140 @@ impl Image {
 
     pub fn height(&self) -> u32 {
         self.height
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+    use std::fs;
+    use std::path::PathBuf;
+
+    fn get_test_image_path(filename: &str) -> String {
+        let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        path.push("test_data/imgs");
+        path.push(filename);
+        path.to_str()
+            .expect("Path contains invalid unicode")
+            .to_string()
+    }
+
+    #[test]
+    fn test_from_file_path_p3() {
+        let img = Image::from_file_path(get_test_image_path("6x3_p3.ppm")).unwrap();
+
+        assert_eq!(img.width(), 3, "Loaded image's width does not match!");
+        assert_eq!(img.height(), 2, "Loaded image's height does not match!");
+        assert_eq!(
+            img.pixels,
+            vec![
+                Pixel::from_rgb(255, 0, 0),
+                Pixel::from_rgb(0, 255, 0),
+                Pixel::from_rgb(0, 0, 255),
+                Pixel::from_rgb(255, 255, 0),
+                Pixel::from_rgb(0, 255, 255),
+                Pixel::from_rgb(255, 0, 255)
+            ],
+            "Loaded image's pixel data does not match!"
+        );
+    }
+
+    #[test]
+    fn test_from_file_path_p6() {
+        let img = Image::from_file_path(get_test_image_path("2x2_p6.ppm")).unwrap();
+
+        assert_eq!(img.width(), 2, "Loaded image's width does not match!");
+        assert_eq!(img.height(), 2, "Loaded image's height does not match!");
+        assert_eq!(
+            img.pixels,
+            vec![
+                Pixel::from_rgb(255, 0, 0),
+                Pixel::from_rgb(0, 0, 0),
+                Pixel::from_rgb(0, 0, 0),
+                Pixel::from_rgb(0, 255, 0)
+            ],
+            "Loaded image's pixel data does not match!"
+        );
+    }
+
+    #[test]
+    fn test_save_to_file_matches_golden_reference() {
+        let mut img = Image::empty(2, 2);
+        img.get_pixel_mut(0, 0).unwrap().set_rgb(255, 0, 0);
+        img.get_pixel_mut(1, 1).unwrap().set_rgb(0, 255, 0);
+
+        let reference_path = get_test_image_path("2x2_p6.ppm");
+
+        let temp_path = env::temp_dir().join(format!("test_out_{}.ppm", std::process::id()));
+        let temp_path_str = temp_path.to_str().unwrap().to_string();
+
+        img.save_to_file(temp_path_str.clone())
+            .expect("Failed to save temp file");
+
+        let generated_bytes = fs::read(&temp_path).expect("Failed to read generated file");
+        let reference_bytes = fs::read(&reference_path).expect("Failed to read reference file");
+
+        assert_eq!(
+            generated_bytes, reference_bytes,
+            "The generated image bytes do not match the golden reference!"
+        );
+
+        let _ = fs::remove_file(temp_path);
+    }
+
+    #[test]
+    fn test_image_parsing_unsupported_magic_number() {
+        let path = get_test_image_path("bad_magic.ppm");
+        let result = Image::from_file_path(path);
+
+        assert!(result.is_err());
+        assert!(
+            matches!(result.unwrap_err(), ImageError::UnsupportedMagicNumber(_)),
+            "Should have failed with UnsupportedMagicNumber"
+        );
+    }
+
+    #[test]
+    fn test_image_error_io_not_found() {
+        let path = get_test_image_path("non_existent_file.ppm");
+        let result = Image::from_file_path(path);
+
+        assert!(result.is_err());
+        assert!(
+            matches!(result.unwrap_err(), ImageError::Io(_)),
+            "Should have failed with an Io error for a missing file"
+        );
+    }
+
+    #[test]
+    fn test_image_error_parse_integer() {
+        let path = get_test_image_path("bad_width.ppm");
+        let result = Image::from_file_path(path);
+
+        assert!(result.is_err());
+
+        let err = result.unwrap_err();
+        
+        assert!(
+            matches!(&err, ImageError::ParseInteger { field, .. } if field == "width"),
+            "Should have failed parsing the width, but got: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_image_error_unsupported_depth() {
+        let path = get_test_image_path("bad_depth.ppm");
+        let result = Image::from_file_path(path);
+
+        assert!(result.is_err());
+
+        let err = result.unwrap_err();
+        assert!(
+            matches!(&err, ImageError::UnsupportedDepth(val) if val == "65535"),
+            "Should have failed with UnsupportedDepth for '65535', but got: {:?}",
+            err
+        );
     }
 }

@@ -21,7 +21,7 @@ fn main() {
         Kernel::new_normalized(3, 3, vec![0.0, -1.0, 0.0, -1.0, 4.0, -1.0, 0.0, -1.0, 0.0])
             .unwrap();
 
-    let img = Image::from_file_path("example_images/big.ppm".into()).unwrap();
+    let img = Image::from_file_path("example_images/hk.ppm".into()).unwrap();
 
     let engine = Engine::new(Padding::Zero);
 

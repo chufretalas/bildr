@@ -69,3 +69,79 @@ impl Engine {
         res_img
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+    use std::fs;
+    use std::path::PathBuf;
+
+    fn get_test_image_path(filename: &str) -> String {
+        let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        path.push("test_data/imgs");
+        path.push(filename);
+        path.to_str()
+            .expect("Path contains invalid unicode")
+            .to_string()
+    }
+
+    #[test]
+    fn test_convolution_identity_kernel() {
+        let engine = Engine::new(Padding::Zero);
+
+        let mut input_img = Image::empty(3, 3);
+        for y in 0..3 {
+            for x in 0..3 {
+                input_img.get_pixel_mut(x, y).unwrap().set_rgb(100, 50, 25);
+            }
+        }
+
+        let identity_weights = vec![0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0];
+        let kernel = Kernel::new(1.0, 3, 3, identity_weights).unwrap();
+
+        let output_img = engine.convolve(&input_img, &kernel);
+
+        for y in 0..3 {
+            for x in 0..3 {
+                let original_pixel = input_img.get_pixel(x, y).unwrap();
+                let convoluted_pixel = output_img.get_pixel(x, y).unwrap();
+                assert_eq!(original_pixel, convoluted_pixel);
+            }
+        }
+    }
+
+    #[test]
+    fn test_convolution_edge_detection_padding_zero() {
+        let input_path = get_test_image_path("100x100_p6.ppm");
+
+        let output_temp_path = env::temp_dir().join(format!("test_out_{}.ppm", std::process::id()));
+        let output_temp_path_str = output_temp_path.to_str().unwrap().to_string();
+
+        let reference_path = get_test_image_path("100x100_p6_edge_detection.ppm");
+
+        let engine = Engine::new(Padding::Zero);
+
+        let input_img = Image::from_file_path(input_path).unwrap();
+
+        let edge_detection_kernel =
+            Kernel::new_normalized(3, 3, vec![0.0, -1.0, 0.0, -1.0, 4.0, -1.0, 0.0, -1.0, 0.0])
+                .unwrap();
+
+        let output_img = engine.convolve(&input_img, &edge_detection_kernel);
+
+        output_img
+            .save_to_file(output_temp_path_str.clone())
+            .expect("Failed to save temp file");
+
+        let generated_bytes = fs::read(&output_temp_path).expect("Failed to read generated file");
+        let reference_bytes = fs::read(&reference_path).expect("Failed to read reference file");
+
+        assert_eq!(
+            generated_bytes, reference_bytes,
+            "The generated image bytes do not match the golden reference!"
+        );
+
+        let _ = fs::remove_file(output_temp_path);
+    }
+}
