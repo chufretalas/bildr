@@ -5,7 +5,7 @@ use crate::{
 
 pub enum Padding {
     Zero,
-    // Clamp, // TODO
+    Clamp,
     // Reflect, // TODO
 }
 
@@ -21,7 +21,7 @@ impl Engine {
     pub fn convolve(&self, input_img: &Image, kernel: &Kernel) -> Image {
         let w = input_img.width();
         let h = input_img.height();
-        let mut res_img = Image::empty(w, h);
+        let mut res_img = Image::black(w, h);
 
         let start_y = -(kernel.anchor_y() as i32);
         let end_y = kernel.height() as i32 - kernel.anchor_y() as i32;
@@ -43,6 +43,28 @@ impl Engine {
                             Some(p) => p,
                             None => match self.padding {
                                 Padding::Zero => Pixel::black(),
+                                Padding::Clamp => {
+                                    let target_x = x + dx;
+                                    let target_y = y + dy;
+
+                                    let clamped_x = if target_x < 0 {
+                                        0
+                                    } else if target_x >= input_img.width() as i32 {
+                                        (input_img.width() - 1) as i32
+                                    } else {
+                                        target_x
+                                    };
+
+                                    let clamped_y = if target_y < 0 {
+                                        0
+                                    } else if target_y >= input_img.height() as i32 {
+                                        (input_img.height() - 1) as i32
+                                    } else {
+                                        target_y
+                                    };
+
+                                    input_img.get_pixel(clamped_x, clamped_y).unwrap()
+                                }
                             },
                         };
 
@@ -90,7 +112,7 @@ mod tests {
     fn test_convolution_identity_kernel() {
         let engine = Engine::new(Padding::Zero);
 
-        let mut input_img = Image::empty(3, 3);
+        let mut input_img = Image::black(3, 3);
         for y in 0..3 {
             for x in 0..3 {
                 input_img.get_pixel_mut(x, y).unwrap().set_rgb(100, 50, 25);
@@ -106,9 +128,331 @@ mod tests {
             for x in 0..3 {
                 let original_pixel = input_img.get_pixel(x, y).unwrap();
                 let convoluted_pixel = output_img.get_pixel(x, y).unwrap();
-                assert_eq!(original_pixel, convoluted_pixel);
+                assert_eq!(
+                    original_pixel, convoluted_pixel,
+                    "Mismatch at x: {}, y: {}",
+                    x, y
+                );
             }
         }
+    }
+
+    #[test]
+    fn test_convolution_padding_clamp_left_border() {
+        let engine = Engine::new(Padding::Clamp);
+
+        // 2x2 image
+        //  red  | black
+        // green | black
+        let mut input_img = Image::black(2, 2);
+        input_img.get_pixel_mut(0, 0).unwrap().set_rgb(255, 0, 0);
+        input_img.get_pixel_mut(0, 1).unwrap().set_rgb(0, 255, 0);
+
+        let kernel = Kernel::new(1.0, 5, 1, vec![1.0, 0.0, 0.0, 0.0, 0.0]).unwrap();
+
+        let output_img = engine.convolve(&input_img, &kernel);
+
+        // Expect
+        //  red  |  red
+        // green | green
+        let mut ref_img = Image::black(3, 3);
+        ref_img.get_pixel_mut(0, 0).unwrap().set_rgb(255, 0, 0);
+        ref_img.get_pixel_mut(1, 0).unwrap().set_rgb(255, 0, 0);
+        ref_img.get_pixel_mut(0, 1).unwrap().set_rgb(0, 255, 0);
+        ref_img.get_pixel_mut(1, 1).unwrap().set_rgb(0, 255, 0);
+
+        for y in 0..2 {
+            for x in 0..2 {
+                let reference_pixel = ref_img.get_pixel(x, y).unwrap();
+                let convoluted_pixel = output_img.get_pixel(x, y).unwrap();
+                assert_eq!(
+                    reference_pixel, convoluted_pixel,
+                    "Mismatch at x: {}, y: {}",
+                    x, y
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_convolution_box_blur_clamp() {
+        let engine = Engine::new(Padding::Clamp);
+
+        // 5x1 image: A steep gradient on the left edge
+        // Red values: [100, 50, 10, 0, 0]
+        let mut input_img = Image::black(5, 1);
+        input_img.get_pixel_mut(0, 0).unwrap().set_rgb(100, 0, 0);
+        input_img.get_pixel_mut(1, 0).unwrap().set_rgb(50, 0, 0);
+        input_img.get_pixel_mut(2, 0).unwrap().set_rgb(10, 0, 0);
+
+        // 5x1 Box Blur
+        let kernel = Kernel::new(0.2, 5, 1, vec![1.0, 1.0, 1.0, 1.0, 1.0]).unwrap();
+
+        let output_img = engine.convolve(&input_img, &kernel);
+
+        let target_pixel = output_img.get_pixel(0, 0).unwrap();
+
+        assert_eq!(target_pixel.r(), 72);
+    }
+
+    #[test]
+    fn test_convolution_padding_clamp_all_borders_deep() {
+        let engine = Engine::new(Padding::Clamp);
+
+        // 3x3 Image. We will paint the middle pixel of each edge a unique color.
+        // Center and corners remain black.
+        let mut input_img = Image::black(3, 3);
+        input_img.get_pixel_mut(1, 0).unwrap().set_rgb(255, 0, 0); // Top edge: Red
+        input_img.get_pixel_mut(1, 2).unwrap().set_rgb(0, 255, 0); // Bottom edge: Green
+        input_img.get_pixel_mut(0, 1).unwrap().set_rgb(0, 0, 255); // Left edge: Blue
+        input_img.get_pixel_mut(2, 1).unwrap().set_rgb(255, 255, 0); // Right edge: Yellow
+
+        // --- 1. Test TOP Border ---
+        #[rustfmt::skip]
+        let look_up = Kernel::new(
+            1.0,
+            5,
+            5,
+            vec![
+                0.0, 0.0, 1.0, 0.0, 0.0,
+                0.0, 0.0, 0.0, 0.0, 0.0,
+                0.0, 0.0, 0.0, 0.0, 0.0,
+                0.0, 0.0, 0.0, 0.0, 0.0, 
+                0.0, 0.0, 0.0, 0.0, 0.0,
+            ],
+        )
+        .unwrap();
+        let out_up = engine.convolve(&input_img, &look_up);
+
+        let top_pixel = out_up.get_pixel(1, 0).unwrap();
+        assert_eq!(
+            top_pixel.r(),
+            255,
+            "Top border clamp failed! Looked 2px out of bounds and didn't get Red."
+        );
+
+        // --- 2. Test BOTTOM Border ---
+        #[rustfmt::skip]
+        let look_down = Kernel::new(
+            1.0,
+            5,
+            5,
+            vec![
+                0.0, 0.0, 0.0, 0.0, 0.0,
+                0.0, 0.0, 0.0, 0.0, 0.0,
+                0.0, 0.0, 0.0, 0.0, 0.0,
+                0.0, 0.0, 0.0, 0.0, 0.0, 
+                0.0, 0.0, 1.0, 0.0, 0.0,
+            ],
+        )
+        .unwrap();
+        let out_down = engine.convolve(&input_img, &look_down);
+
+        let bottom_pixel = out_down.get_pixel(1, 2).unwrap();
+        assert_eq!(
+            bottom_pixel.g(),
+            255,
+            "Bottom border clamp failed! Looked 2px out of bounds and didn't get Green."
+        );
+
+        // --- 3. Test LEFT Border ---
+        #[rustfmt::skip]
+        let look_left = Kernel::new(
+            1.0,
+            5,
+            5,
+            vec![
+                0.0, 0.0, 0.0, 0.0, 0.0,
+                0.0, 0.0, 0.0, 0.0, 0.0,
+                1.0, 0.0, 0.0, 0.0, 0.0,
+                0.0, 0.0, 0.0, 0.0, 0.0, 
+                0.0, 0.0, 0.0, 0.0, 0.0,
+            ],
+        )
+        .unwrap();
+        let out_left = engine.convolve(&input_img, &look_left);
+
+        let left_pixel = out_left.get_pixel(0, 1).unwrap();
+        assert_eq!(
+            left_pixel.b(),
+            255,
+            "Left border clamp failed! Looked 2px out of bounds and didn't get Blue."
+        );
+
+        // --- 4. Test RIGHT Border ---
+        #[rustfmt::skip]
+        let look_right = Kernel::new(
+            1.0,
+            5,
+            5,
+            vec![
+                0.0, 0.0, 0.0, 0.0, 0.0, 
+                0.0, 0.0, 0.0, 0.0, 0.0, 
+                0.0, 0.0, 0.0, 0.0, 1.0, 
+                0.0, 0.0, 0.0, 0.0, 0.0, 
+                0.0, 0.0, 0.0, 0.0, 0.0,
+            ],
+        )
+        .unwrap();
+        let out_right = engine.convolve(&input_img, &look_right);
+
+        let right_pixel = out_right.get_pixel(2, 1).unwrap();
+        assert_eq!(
+            right_pixel.r(),
+            255,
+            "Right border clamp failed! (Red component missing)"
+        );
+        assert_eq!(
+            right_pixel.g(),
+            255,
+            "Right border clamp failed! (Green component missing)"
+        );
+    }
+
+    #[test]
+    fn test_convolution_padding_clamp_all_corners_deep() {
+        let engine = Engine::new(Padding::Clamp);
+
+        // 3x3 Image. We will paint the four corners unique colors.
+        let mut input_img = Image::black(3, 3);
+        input_img.get_pixel_mut(0, 0).unwrap().set_rgb(255, 0, 0); // Top-Left: Red
+        input_img.get_pixel_mut(2, 0).unwrap().set_rgb(0, 255, 0); // Top-Right: Green
+        input_img.get_pixel_mut(0, 2).unwrap().set_rgb(0, 0, 255); // Bottom-Left: Blue
+        input_img.get_pixel_mut(2, 2).unwrap().set_rgb(255, 255, 0); // Bottom-Right: Yellow
+
+        // --- 1. Test TOP-LEFT Corner ---
+        #[rustfmt::skip]
+        let look_up_left = Kernel::new(
+            1.0,
+            5,
+            5,
+            vec![
+                1.0, 0.0, 0.0, 0.0, 0.0,
+                0.0, 0.0, 0.0, 0.0, 0.0,
+                0.0, 0.0, 0.0, 0.0, 0.0,
+                0.0, 0.0, 0.0, 0.0, 0.0,
+                0.0, 0.0, 0.0, 0.0, 0.0,
+            ],
+        )
+        .unwrap();
+        let out_ul = engine.convolve(&input_img, &look_up_left);
+
+        let top_left_pixel = out_ul.get_pixel(0, 0).unwrap();
+        assert_eq!(
+            top_left_pixel.r(),
+            255,
+            "Top-Left corner clamp failed! Looked out of bounds diagonally and didn't get Red."
+        );
+
+        // --- 2. Test TOP-RIGHT Corner ---
+        #[rustfmt::skip]
+        let look_up_right = Kernel::new(
+            1.0,
+            5,
+            5,
+            vec![
+                0.0, 0.0, 0.0, 0.0, 1.0, 
+                0.0, 0.0, 0.0, 0.0, 0.0, 
+                0.0, 0.0, 0.0, 0.0, 0.0, 
+                0.0, 0.0, 0.0, 0.0, 0.0, 
+                0.0, 0.0, 0.0, 0.0, 0.0,
+            ],
+        )
+        .unwrap();
+        let out_ur = engine.convolve(&input_img, &look_up_right);
+
+        let top_right_pixel = out_ur.get_pixel(2, 0).unwrap();
+        assert_eq!(
+            top_right_pixel.g(),
+            255,
+            "Top-Right corner clamp failed! Looked out of bounds diagonally and didn't get Green."
+        );
+
+        // --- 3. Test BOTTOM-LEFT Corner ---
+        #[rustfmt::skip]
+        let look_down_left = Kernel::new(
+            1.0,
+            5,
+            5,
+            vec![
+                0.0, 0.0, 0.0, 0.0, 0.0,
+                0.0, 0.0, 0.0, 0.0, 0.0,
+                0.0, 0.0, 0.0, 0.0, 0.0,
+                0.0, 0.0, 0.0, 0.0, 0.0,
+                1.0, 0.0, 0.0, 0.0, 0.0,
+            ],
+        )
+        .unwrap();
+        let out_dl = engine.convolve(&input_img, &look_down_left);
+
+        let bottom_left_pixel = out_dl.get_pixel(0, 2).unwrap();
+        assert_eq!(
+            bottom_left_pixel.b(),
+            255,
+            "Bottom-Left corner clamp failed! Looked out of bounds diagonally and didn't get Blue."
+        );
+
+        // --- 4. Test BOTTOM-RIGHT Corner ---
+        #[rustfmt::skip]
+        let look_down_right = Kernel::new(
+            1.0,
+            5,
+            5,
+            vec![
+                0.0, 0.0, 0.0, 0.0, 0.0,
+                0.0, 0.0, 0.0, 0.0, 0.0,
+                0.0, 0.0, 0.0, 0.0, 0.0,
+                0.0, 0.0, 0.0, 0.0, 0.0,
+                0.0, 0.0, 0.0, 0.0, 1.0,
+            ],
+        )
+        .unwrap();
+        let out_dr = engine.convolve(&input_img, &look_down_right);
+
+        let bottom_right_pixel = out_dr.get_pixel(2, 2).unwrap();
+        assert_eq!(
+            bottom_right_pixel.r(),
+            255,
+            "Bottom-Right corner clamp failed! (Red missing)"
+        );
+        assert_eq!(
+            bottom_right_pixel.g(),
+            255,
+            "Bottom-Right corner clamp failed! (Green missing)"
+        );
+    }
+
+    #[test]
+    fn test_convolution_padding_clamp_asymmetrical_out_of_bounds() {
+        let engine = Engine::new(Padding::Clamp);
+
+        // 3x3 Image with a Red Top-Left corner
+        let mut input_img = Image::black(3, 3);
+        input_img.get_pixel_mut(0, 0).unwrap().set_rgb(255, 0, 0);
+
+        // 5x5 Kernel. Anchored at center (dx=0, dy=0).
+        // We place the 1.0 at dx = -1, dy = -2.
+        #[rustfmt::skip]
+        let look_knight_move = Kernel::new(1.0, 5, 5, vec![
+            0.0, 1.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0,
+        ]).unwrap();
+
+        let output_img = engine.convolve(&input_img, &look_knight_move);
+
+        // Evaluate at x=0, y=0.
+        // The kernel will ask for x = 0 + (-1) = -1
+        // The kernel will ask for y = 0 + (-2) = -2
+        // It should clamp to (0, 0), which is Red.
+        let top_left_pixel = output_img.get_pixel(0, 0).unwrap();
+        assert_eq!(
+            top_left_pixel.r(),
+            255,
+            "Asymmetrical clamp failed! (-1, -2) did not clamp back to (0, 0)."
+        );
     }
 
     #[test]

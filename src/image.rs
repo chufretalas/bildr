@@ -104,11 +104,15 @@ pub struct Image {
 }
 
 impl Image {
-    pub fn empty(width: u32, height: u32) -> Self {
+    pub fn black(width: u32, height: u32) -> Self {
+        Self::solid(width, height, Pixel::black())
+    }
+
+    pub fn solid(width: u32, height: u32, color: Pixel) -> Self {
         Image {
             width,
             height,
-            pixels: vec![Pixel::black(); (width * height) as usize],
+            pixels: vec![color; (width * height) as usize],
         }
     }
 
@@ -348,7 +352,7 @@ mod tests {
 
     #[test]
     fn test_save_to_file_matches_golden_reference() {
-        let mut img = Image::empty(2, 2);
+        let mut img = Image::black(2, 2);
         img.get_pixel_mut(0, 0).unwrap().set_rgb(255, 0, 0);
         img.get_pixel_mut(1, 1).unwrap().set_rgb(0, 255, 0);
 
@@ -403,7 +407,7 @@ mod tests {
         assert!(result.is_err());
 
         let err = result.unwrap_err();
-        
+
         assert!(
             matches!(&err, ImageError::ParseInteger { field, .. } if field == "width"),
             "Should have failed parsing the width, but got: {:?}",
