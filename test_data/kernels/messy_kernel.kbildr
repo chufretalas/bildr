@@ -1,0 +1,12 @@
+# This is a custom blur kernel
+
+0.5
+
+# Dimensions below:
+2 2
+
+# Row 1
+1.0 2.0
+
+# Row 2
+3.0 4.0

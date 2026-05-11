@@ -1,3 +1,5 @@
+use std::fs;
+
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -8,8 +10,19 @@ pub enum KernelError {
     #[error("IO Error: {0}")]
     Io(#[from] std::io::Error),
 
+    #[error("Could not parse line: ")]
+    BadLine(String),
+
     #[error("Failed to parse kernel scaling factor: {0}")]
     ParseScalingFactor(#[source] std::num::ParseFloatError),
+
+    #[error("Failed to parse kernel {field}. The value '{value}' is invalid.")]
+    ParseDimensionValue {
+        field: String,
+        value: String,
+        #[source]
+        source: std::num::ParseIntError,
+    },
 
     #[error("Failed to parse kernel weight value: {0}")]
     ParseWeight(#[source] std::num::ParseFloatError),
@@ -28,7 +41,74 @@ pub struct Kernel {
 }
 
 impl Kernel {
-    // TODO add a Kernel::from_file
+    pub fn from_file_path(path: String, normalize: bool) -> Result<Self, KernelError> {
+        let content = fs::read_to_string(path)?;
+
+        let mut valid_lines = content
+            .lines()
+            .map(|l| l.trim())
+            .filter(|l| !l.is_empty() && !l.starts_with('#'));
+
+        let sf_line = valid_lines
+            .next()
+            .ok_or_else(|| KernelError::BadLine("Missing scaling factor".into()))?;
+        let scaling_factor = sf_line
+            .parse::<f32>()
+            .map_err(KernelError::ParseScalingFactor)?;
+
+        let dim_line = valid_lines
+            .next()
+            .ok_or_else(|| KernelError::BadLine("Missing dimensions".into()))?;
+
+        let mut dim_parts = dim_line.split_whitespace();
+        let height_str = dim_parts
+            .next()
+            .ok_or_else(|| KernelError::BadLine("Missing height".into()))?;
+        let width_str = dim_parts
+            .next()
+            .ok_or_else(|| KernelError::BadLine("Missing width".into()))?;
+
+        let height = height_str
+            .parse::<u32>()
+            .map_err(|e| KernelError::ParseDimensionValue {
+                field: "height".into(),
+                value: height_str.into(),
+                source: e,
+            })?;
+
+        let width = width_str
+            .parse::<u32>()
+            .map_err(|e| KernelError::ParseDimensionValue {
+                field: "width".into(),
+                value: width_str.into(),
+                source: e,
+            })?;
+
+        let mut weights = Vec::with_capacity((width * height) as usize);
+
+        for line in valid_lines {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+
+            if parts.len() != width as usize {
+                return Err(KernelError::BadLine(format!(
+                    "Expected {} values in weight line, got {}",
+                    width,
+                    parts.len()
+                )));
+            }
+
+            for w_str in parts {
+                let w = w_str.parse::<f32>().map_err(KernelError::ParseWeight)?;
+                weights.push(w);
+            }
+        }
+
+        if normalize {
+            Self::new_normalized(width, height, weights)
+        } else {
+            Self::new(scaling_factor, width, height, weights)
+        }
+    }
 
     pub fn new(
         scaling_factor: f32,
@@ -102,6 +182,45 @@ impl Kernel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn get_test_kernel_path(filename: &str) -> String {
+        let mut path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        path.push("test_data/kernels");
+        path.push(filename);
+        path.to_str()
+            .expect("Path contains invalid unicode")
+            .to_string()
+    }
+
+    #[test]
+    fn test_kernel_from_file_path_with_comments_and_spaces() {
+        let path = get_test_kernel_path("messy_kernel.kbildr");
+
+        let kernel = Kernel::from_file_path(path, false).unwrap();
+
+        assert_eq!(kernel.scaling_factor(), 0.5);
+        assert_eq!(kernel.width(), 2);
+        assert_eq!(kernel.height(), 2);
+
+        assert_eq!(kernel.get_weight(-1, -1), Some(1.0));
+        assert_eq!(kernel.get_weight(0, 0), Some(4.0));
+    }
+
+    #[test]
+    fn test_kernel_from_file_path_missing_dimensions() {
+        let path = get_test_kernel_path("missing_dimensions.kbildr");
+
+        let result = Kernel::from_file_path(path, false);
+
+        assert!(result.is_err());
+
+        let err = result.unwrap_err();
+        assert!(
+            matches!(&err, KernelError::BadLine(msg) if msg.contains("Missing width")),
+            "Expected a BadLine error regarding missing width, got: {:?}",
+            err
+        );
+    }
 
     #[test]
     fn test_kernel_creations() {
