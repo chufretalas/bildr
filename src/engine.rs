@@ -99,13 +99,11 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
 
-    fn get_test_image_path(filename: &str) -> String {
+    fn get_test_image_path(filename: &str) -> PathBuf {
         let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         path.push("test_data/imgs");
         path.push(filename);
-        path.to_str()
-            .expect("Path contains invalid unicode")
-            .to_string()
+        path
     }
 
     #[test]
@@ -466,7 +464,7 @@ mod tests {
 
         let engine = Engine::new(Padding::Zero);
 
-        let input_img = Image::from_file_path(input_path).unwrap();
+        let input_img = Image::from_file_path(&input_path).unwrap();
 
         let edge_detection_kernel =
             Kernel::new_normalized(3, 3, vec![0.0, -1.0, 0.0, -1.0, 4.0, -1.0, 0.0, -1.0, 0.0])

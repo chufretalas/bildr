@@ -1,6 +1,6 @@
 use std::{
     fs::File,
-    io::{BufReader, BufWriter, Read, Write},
+    io::{BufReader, BufWriter, Read, Write}, path::Path,
 };
 
 use thiserror::Error;
@@ -116,7 +116,7 @@ impl Image {
         }
     }
 
-    pub fn from_file_path(path: String) -> Result<Self, ImageError> {
+    pub fn from_file_path(path: &Path) -> Result<Self, ImageError> {
         //TODO: skip comments in the header
         let file = File::open(path)?;
 
@@ -303,18 +303,16 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
 
-    fn get_test_image_path(filename: &str) -> String {
+    fn get_test_image_path(filename: &str) -> PathBuf {
         let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         path.push("test_data/imgs");
         path.push(filename);
-        path.to_str()
-            .expect("Path contains invalid unicode")
-            .to_string()
+        path
     }
 
     #[test]
     fn test_from_file_path_p3() {
-        let img = Image::from_file_path(get_test_image_path("6x3_p3.ppm")).unwrap();
+        let img = Image::from_file_path(&get_test_image_path("6x3_p3.ppm")).unwrap();
 
         assert_eq!(img.width(), 3, "Loaded image's width does not match!");
         assert_eq!(img.height(), 2, "Loaded image's height does not match!");
@@ -334,7 +332,7 @@ mod tests {
 
     #[test]
     fn test_from_file_path_p6() {
-        let img = Image::from_file_path(get_test_image_path("2x2_p6.ppm")).unwrap();
+        let img = Image::from_file_path(&get_test_image_path("2x2_p6.ppm")).unwrap();
 
         assert_eq!(img.width(), 2, "Loaded image's width does not match!");
         assert_eq!(img.height(), 2, "Loaded image's height does not match!");
@@ -378,7 +376,7 @@ mod tests {
     #[test]
     fn test_image_parsing_unsupported_magic_number() {
         let path = get_test_image_path("bad_magic.ppm");
-        let result = Image::from_file_path(path);
+        let result = Image::from_file_path(&path);
 
         assert!(result.is_err());
         assert!(
@@ -390,7 +388,7 @@ mod tests {
     #[test]
     fn test_image_error_io_not_found() {
         let path = get_test_image_path("non_existent_file.ppm");
-        let result = Image::from_file_path(path);
+        let result = Image::from_file_path(&path);
 
         assert!(result.is_err());
         assert!(
@@ -402,7 +400,7 @@ mod tests {
     #[test]
     fn test_image_error_parse_integer() {
         let path = get_test_image_path("bad_width.ppm");
-        let result = Image::from_file_path(path);
+        let result = Image::from_file_path(&path);
 
         assert!(result.is_err());
 
@@ -418,7 +416,7 @@ mod tests {
     #[test]
     fn test_image_error_unsupported_depth() {
         let path = get_test_image_path("bad_depth.ppm");
-        let result = Image::from_file_path(path);
+        let result = Image::from_file_path(&path);
 
         assert!(result.is_err());
 

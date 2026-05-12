@@ -1,4 +1,4 @@
-use std::fs;
+use std::{fs, path::Path};
 
 use thiserror::Error;
 
@@ -41,7 +41,7 @@ pub struct Kernel {
 }
 
 impl Kernel {
-    pub fn from_file_path(path: String, normalize: bool) -> Result<Self, KernelError> {
+    pub fn from_file_path(path: &Path, normalize: bool) -> Result<Self, KernelError> {
         let content = fs::read_to_string(path)?;
 
         let mut valid_lines = content
@@ -181,22 +181,22 @@ impl Kernel {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::path::PathBuf;
 
-    fn get_test_kernel_path(filename: &str) -> String {
+use super::*;
+
+    fn get_test_kernel_path(filename: &str) -> PathBuf {
         let mut path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         path.push("test_data/kernels");
         path.push(filename);
-        path.to_str()
-            .expect("Path contains invalid unicode")
-            .to_string()
+        path
     }
 
     #[test]
     fn test_kernel_from_file_path_with_comments_and_spaces() {
         let path = get_test_kernel_path("messy_kernel.kbildr");
 
-        let kernel = Kernel::from_file_path(path, false).unwrap();
+        let kernel = Kernel::from_file_path(&path, false).unwrap();
 
         assert_eq!(kernel.scaling_factor(), 0.5);
         assert_eq!(kernel.width(), 2);
@@ -210,7 +210,7 @@ mod tests {
     fn test_kernel_from_file_path_missing_dimensions() {
         let path = get_test_kernel_path("missing_dimensions.kbildr");
 
-        let result = Kernel::from_file_path(path, false);
+        let result = Kernel::from_file_path(&path, false);
 
         assert!(result.is_err());
 
