@@ -1,8 +1,11 @@
+use clap::ValueEnum;
+
 use crate::{
     image::{Image, Pixel},
     kernel::Kernel,
 };
 
+#[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum Padding {
     Zero,
     Clamp,
@@ -458,7 +461,6 @@ mod tests {
         let input_path = get_test_image_path("100x100_p6.ppm");
 
         let output_temp_path = env::temp_dir().join(format!("test_out_{}.ppm", std::process::id()));
-        let output_temp_path_str = output_temp_path.to_str().unwrap().to_string();
 
         let reference_path = get_test_image_path("100x100_p6_edge_detection.ppm");
 
@@ -473,7 +475,7 @@ mod tests {
         let output_img = engine.convolve(&input_img, &edge_detection_kernel);
 
         output_img
-            .save_to_file(output_temp_path_str.clone())
+            .save_to_file(&output_temp_path)
             .expect("Failed to save temp file");
 
         let generated_bytes = fs::read(&output_temp_path).expect("Failed to read generated file");

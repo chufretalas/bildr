@@ -248,7 +248,7 @@ impl Image {
     }
 
     ///Saves the image to the desired location as a P6 .ppm file
-    pub fn save_to_file(&self, path: String) -> Result<(), ImageError> {
+    pub fn save_to_file(&self, path: &Path) -> Result<(), ImageError> {
         let file = File::create(path)?;
         let mut writer = BufWriter::new(file);
 
@@ -357,9 +357,8 @@ mod tests {
         let reference_path = get_test_image_path("2x2_p6.ppm");
 
         let temp_path = env::temp_dir().join(format!("test_out_{}.ppm", std::process::id()));
-        let temp_path_str = temp_path.to_str().unwrap().to_string();
 
-        img.save_to_file(temp_path_str.clone())
+        img.save_to_file(&temp_path)
             .expect("Failed to save temp file");
 
         let generated_bytes = fs::read(&temp_path).expect("Failed to read generated file");

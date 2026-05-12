@@ -2,32 +2,47 @@ mod engine;
 mod image;
 mod kernel;
 
-use std::path::Path;
+use std::path::PathBuf;
+
+use clap::Parser;
 
 use crate::engine::{Engine, Padding};
 
 use crate::image::Image;
 use crate::kernel::Kernel;
 
+#[derive(Parser, Debug)]
+struct Cli {
+    /// Input file (ex: imagem.ppm)
+    input: PathBuf,
+
+    /// Output file (ex: resultado.png)
+    output: PathBuf,
+
+    /// REQUIRED: kernel file
+    #[arg(short, long)]
+    kernel: PathBuf,
+
+    /// OPTIONAL: whether or not or not to normalize the kernel automatically
+    #[arg(short, long)]
+    normalize: bool,
+
+    /// OPTIONAL: Which type of padding to use
+    #[arg(short, long, value_enum, default_value_t=Padding::Zero)]
+    padding: Padding,
+}
+
 fn main() {
-    let blur_box_kernel = Kernel::new_normalized(3, 3, vec![1.0; 9]).unwrap();
+    //TODO: Improve application layer errors
+    let args = Cli::parse();
 
-    let sharpen_kernel = Kernel::new_normalized(
-        3,
-        3,
-        vec![-1.0, -1.0, -1.0, -1.0, 9.0, -1.0, -1.0, -1.0, -1.0],
-    )
-    .unwrap();
+    let img = Image::from_file_path(&args.input).unwrap();
 
-    let edge_detection_kernel =
-        Kernel::new_normalized(3, 3, vec![0.0, -1.0, 0.0, -1.0, 4.0, -1.0, 0.0, -1.0, 0.0])
-            .unwrap();
+    let kernel = Kernel::from_file_path(&args.kernel, args.normalize).unwrap();
 
-    let img = Image::from_file_path(Path::new("example_images/hk.ppm")).unwrap();
+    let engine = Engine::new(args.padding);
 
-    let engine = Engine::new(Padding::Zero);
+    let out_img = engine.convolve(&img, &kernel);
 
-    let out_img = engine.convolve(&img, &edge_detection_kernel);
-
-    out_img.save_to_file("./test.ppm".into()).unwrap();
+    out_img.save_to_file(&args.output).unwrap();
 }
