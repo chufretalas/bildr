@@ -1,6 +1,7 @@
 use std::{
     fs::File,
-    io::{BufReader, BufWriter, Read, Write}, path::Path,
+    io::{BufReader, BufWriter, Read, Write},
+    path::Path,
 };
 
 use thiserror::Error;
@@ -23,6 +24,9 @@ pub enum ImageError {
 
     #[error("Only 8-bit depth (255) is supported. Found: {0}")]
     UnsupportedDepth(String),
+
+    #[error("The position asked for is out of bound")]
+    OutOfBounds,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -284,6 +288,15 @@ impl Image {
             None
         } else {
             Some(&mut self.pixels[(y * self.width as i32 + x) as usize])
+        }
+    }
+
+    pub fn set_pixel(&mut self, x: i32, y: i32, pixel: Pixel) -> Result<(), ImageError> {
+        if x < 0 || x >= self.width as i32 || y < 0 || y >= self.height as i32 {
+            Err(ImageError::OutOfBounds)
+        } else {
+            self.pixels[(y * self.width as i32 + x) as usize] = pixel;
+            Ok(())
         }
     }
 

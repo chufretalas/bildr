@@ -1,3 +1,5 @@
+use std::sync::mpsc::Sender;
+
 use clap::ValueEnum;
 
 use crate::{
@@ -21,77 +23,83 @@ impl Engine {
         Engine { padding }
     }
 
+    #[inline]
+    fn compute_pixel(&self, input_img: &Image, kernel: &Kernel, x: i32, y: i32) -> Pixel {
+        let start_y = -(kernel.anchor_y() as i32);
+        let end_y = kernel.height() as i32 - kernel.anchor_y() as i32;
+        let start_x = -(kernel.anchor_x() as i32);
+        let end_x = kernel.width() as i32 - kernel.anchor_x() as i32;
+
+        let mut new_r = 0.0;
+        let mut new_g = 0.0;
+        let mut new_b = 0.0;
+
+        for dy in start_y..end_y {
+            for dx in start_x..end_x {
+                let pixel = match input_img.get_pixel(x + dx, y + dy) {
+                    Some(p) => p,
+                    None => match self.padding {
+                        Padding::Zero => Pixel::black(),
+                        Padding::Clamp => {
+                            let clamped_x = (x + dx).clamp(0, (input_img.width() - 1) as i32);
+                            let clamped_y = (y + dy).clamp(0, (input_img.height() - 1) as i32);
+
+                            input_img.get_pixel(clamped_x, clamped_y).unwrap()
+                        }
+                    },
+                };
+
+                let weight = kernel.get_weight(dx, dy).unwrap();
+                new_r += pixel.r() as f32 * weight;
+                new_g += pixel.g() as f32 * weight;
+                new_b += pixel.b() as f32 * weight;
+            }
+        }
+
+        new_r *= kernel.scaling_factor();
+        new_g *= kernel.scaling_factor();
+        new_b *= kernel.scaling_factor();
+
+        Pixel::from_rgb(
+            new_r.clamp(0.0, 255.0) as u8,
+            new_g.clamp(0.0, 255.0) as u8,
+            new_b.clamp(0.0, 255.0) as u8,
+        )
+    }
+
     pub fn convolve(&self, input_img: &Image, kernel: &Kernel) -> Image {
         let w = input_img.width();
         let h = input_img.height();
         let mut res_img = Image::black(w, h);
 
-        let start_y = -(kernel.anchor_y() as i32);
-        let end_y = kernel.height() as i32 - kernel.anchor_y() as i32;
-
-        let start_x = -(kernel.anchor_x() as i32);
-        let end_x = kernel.width() as i32 - kernel.anchor_x() as i32;
-
-        // Looping through the image
         for y in 0..(h as i32) {
             for x in 0..(w as i32) {
-                let mut new_r = 0.0;
-                let mut new_g = 0.0;
-                let mut new_b = 0.0;
-
-                // Looping through the kernel for each pixel
-                for dy in start_y..end_y {
-                    for dx in start_x..end_x {
-                        let pixel = match input_img.get_pixel(x + dx, y + dy) {
-                            Some(p) => p,
-                            None => match self.padding {
-                                Padding::Zero => Pixel::black(),
-                                Padding::Clamp => {
-                                    let target_x = x + dx;
-                                    let target_y = y + dy;
-
-                                    let clamped_x = if target_x < 0 {
-                                        0
-                                    } else if target_x >= input_img.width() as i32 {
-                                        (input_img.width() - 1) as i32
-                                    } else {
-                                        target_x
-                                    };
-
-                                    let clamped_y = if target_y < 0 {
-                                        0
-                                    } else if target_y >= input_img.height() as i32 {
-                                        (input_img.height() - 1) as i32
-                                    } else {
-                                        target_y
-                                    };
-
-                                    input_img.get_pixel(clamped_x, clamped_y).unwrap()
-                                }
-                            },
-                        };
-
-                        let weight = kernel.get_weight(dx, dy).unwrap();
-                        new_r += pixel.r() as f32 * weight;
-                        new_g += pixel.g() as f32 * weight;
-                        new_b += pixel.b() as f32 * weight;
-                    }
-                }
-
-                new_r *= kernel.scaling_factor();
-                new_g *= kernel.scaling_factor();
-                new_b *= kernel.scaling_factor();
-
-                let res_pixel = res_img.get_pixel_mut(x, y).unwrap();
-                res_pixel.set_rgb(
-                    new_r.clamp(0.0, 255.0) as u8,
-                    new_g.clamp(0.0, 255.0) as u8,
-                    new_b.clamp(0.0, 255.0) as u8,
-                );
+                let res_pixel = self.compute_pixel(input_img, kernel, x, y);
+                let _ = res_img.set_pixel(x, y, res_pixel);
             }
         }
 
         res_img
+    }
+
+    /// Does the convolution line by line sending each line's result through tx before starting the next line
+    pub fn convolve_with_channel(
+        &self,
+        input_img: &Image,
+        kernel: &Kernel,
+        tx: Sender<(usize, Vec<Pixel>)>,
+    ) {
+        let w = input_img.width();
+        let h = input_img.height();
+        let mut line_buffer = vec![Pixel::black(); w as usize];
+
+        for y in 0..(h as i32) {
+            for x in 0..(w as i32) {
+                line_buffer[x as usize] = self.compute_pixel(input_img, kernel, x, y);
+            }
+
+            let _ = tx.send((y as usize, line_buffer.clone()));
+        }
     }
 }
 

@@ -3,12 +3,14 @@ mod image;
 mod kernel;
 
 use std::path::PathBuf;
+use std::sync::mpsc::channel;
+use std::thread;
 
 use clap::Parser;
 
 use crate::engine::{Engine, Padding};
 
-use crate::image::Image;
+use crate::image::{Image, Pixel};
 use crate::kernel::Kernel;
 
 #[derive(Parser, Debug)]
@@ -30,6 +32,10 @@ struct Cli {
     /// OPTIONAL: Which type of padding to use
     #[arg(short, long, value_enum, default_value_t=Padding::Zero)]
     padding: Padding,
+
+    /// OPTIONAL: Opens a windows to visualize the convolution process
+    #[arg(short, long)]
+    visualize: bool,
 }
 
 fn main() {
@@ -42,7 +48,31 @@ fn main() {
 
     let engine = Engine::new(args.padding);
 
-    let out_img = engine.convolve(&img, &kernel);
+    let out_img = if args.visualize {
+        let mut out_img = img.clone();
+
+        let (tx, rx) = channel::<(usize, Vec<Pixel>)>();
+        let compute_handle = thread::spawn(move || {
+            engine.convolve_with_channel(&img, &kernel, tx);
+        });
+
+        for _ in 0..out_img.height() {
+            let (y, line_data) = rx.recv().unwrap();
+
+            // TODO: write result to the frame buffer
+
+            // Build the final img
+            for x in 0..out_img.width() as i32 {
+                let _ = out_img.set_pixel(x, y as i32, line_data[x as usize]);
+            }
+        }
+
+        compute_handle.join().expect("Compute thread panicked!");
+
+        out_img
+    } else {
+        engine.convolve(&img, &kernel)
+    };
 
     out_img.save_to_file(&args.output).unwrap();
 }
