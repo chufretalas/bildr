@@ -7,6 +7,7 @@ use std::sync::mpsc::channel;
 use std::thread;
 
 use clap::Parser;
+use minifb::{Window, WindowOptions};
 
 use crate::engine::{Engine, Padding};
 
@@ -49,27 +50,43 @@ fn main() {
     let engine = Engine::new(args.padding);
 
     let out_img = if args.visualize {
-        let mut out_img = img.clone();
+        let mut minifb_buffer = img.to_minifb_buffer();
+        let width = img.width() as usize;
+        let height = img.height() as usize;
+
+        let mut window = Window::new(
+            "bildr - ESC to exit",
+            width,
+            height,
+            WindowOptions::default(),
+        )
+        .unwrap_or_else(|e| {
+            panic!("{}", e);
+        });
+
+        window.set_target_fps(60);
 
         let (tx, rx) = channel::<(usize, Vec<Pixel>)>();
         let compute_handle = thread::spawn(move || {
             engine.convolve_with_channel(&img, &kernel, tx);
         });
 
-        for _ in 0..out_img.height() {
+        for _ in 0..height {
             let (y, line_data) = rx.recv().unwrap();
 
-            // TODO: write result to the frame buffer
-
             // Build the final img
-            for x in 0..out_img.width() as i32 {
-                let _ = out_img.set_pixel(x, y as i32, line_data[x as usize]);
+            for x in 0..width {
+                minifb_buffer[(y * width + x) as usize] = line_data[x].to_minifb_pixel();
             }
+
+            window
+                .update_with_buffer(&minifb_buffer, width, height)
+                .unwrap();
         }
 
         compute_handle.join().expect("Compute thread panicked!");
 
-        out_img
+        Image::from_minifb_buffer(minifb_buffer, width as u32, height as u32)
     } else {
         engine.convolve(&img, &kernel)
     };

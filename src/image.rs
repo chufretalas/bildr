@@ -62,6 +62,22 @@ impl Pixel {
         self.g = g;
         self.b = b;
     }
+
+    pub fn to_minifb_pixel(&self) -> u32 {
+        let r = self.r() as u32;
+        let g = self.g() as u32;
+        let b = self.b() as u32;
+
+        (r << 16) | (g << 8) | b
+    }
+
+    pub fn from_minifb_pixel(minifb_pixel: u32) -> Self {
+        Pixel::from_rgb(
+            (minifb_pixel >> 16) as u8, // red
+            (minifb_pixel >> 8) as u8,  // green
+            minifb_pixel as u8,         // blue
+        )
+    }
 }
 
 #[derive(PartialEq, Eq)]
@@ -100,6 +116,7 @@ impl PpmParserStt {
     }
 }
 
+// TODO: change width and height into usize
 #[derive(Debug, Clone)]
 pub struct Image {
     width: u32,
@@ -117,6 +134,17 @@ impl Image {
             width,
             height,
             pixels: vec![color; (width * height) as usize],
+        }
+    }
+
+    pub fn from_minifb_buffer(minifb_buffer: Vec<u32>, width: u32, height: u32) -> Self {
+        Image {
+            width,
+            height,
+            pixels: minifb_buffer
+                .into_iter()
+                .map(Pixel::from_minifb_pixel)
+                .collect(),
         }
     }
 
@@ -306,6 +334,10 @@ impl Image {
 
     pub fn height(&self) -> u32 {
         self.height
+    }
+
+    pub fn to_minifb_buffer(&self) -> Vec<u32> {
+        self.pixels.iter().map(Pixel::to_minifb_pixel).collect()
     }
 }
 

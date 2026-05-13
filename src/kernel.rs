@@ -28,6 +28,7 @@ pub enum KernelError {
     ParseWeight(#[source] std::num::ParseFloatError),
 }
 
+// TODO: change width, height and anchors into usize
 #[derive(Debug, Clone)]
 pub struct Kernel {
     scaling_factor: f32,
