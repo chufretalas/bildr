@@ -6,6 +6,8 @@ use std::{
 
 use thiserror::Error;
 
+use crate::image;
+
 #[derive(Debug, Error)]
 pub enum ImageError {
     #[error("IO Error: {0}")]
@@ -27,6 +29,9 @@ pub enum ImageError {
 
     #[error("The position asked for is out of bound")]
     OutOfBounds,
+
+    #[error("The only supported files types are PPM (.ppm) and BITMAP (.bmp)")]
+    UnsupportedDestinationFileType,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,15 +51,15 @@ impl Pixel {
     }
 
     pub fn r(&self) -> u8 {
-        return self.r;
+        self.r
     }
 
     pub fn g(&self) -> u8 {
-        return self.g;
+        self.g
     }
 
     pub fn b(&self) -> u8 {
-        return self.b;
+        self.b
     }
 
     pub fn set_rgb(&mut self, r: u8, g: u8, b: u8) {
@@ -279,8 +284,7 @@ impl Image {
         Ok(img)
     }
 
-    ///Saves the image to the desired location as a P6 .ppm file
-    pub fn save_to_file(&self, path: &Path) -> Result<(), ImageError> {
+    fn save_to_file_p6_ppm(&self, path: &Path) -> Result<(), ImageError> {
         let file = File::create(path)?;
         let mut writer = BufWriter::new(file);
 
@@ -294,6 +298,64 @@ impl Image {
 
         writer.flush()?;
         Ok(())
+    }
+
+    fn save_to_file_bmp(&self, path: &Path) -> Result<(), ImageError> {
+        let file = File::create(path)?;
+        let mut writer = BufWriter::new(file);
+
+        let row_padding = (4 - (self.width * 3) % 4) % 4;
+        let img_section_size: u32 = (self.width * 3 + row_padding) * self.height;
+
+        // File Header
+        writer.write_all(b"BM")?;
+        writer.write_all(&(img_section_size + 54u32).to_le_bytes())?; // File size
+        writer.write_all(&0u16.to_le_bytes())?; // Doesn't matter
+        writer.write_all(&0u16.to_le_bytes())?; // Doesn't matter
+        writer.write_all(&54u32.to_le_bytes())?; // Offset to the pixel data, i.e header size
+
+        // DIB Header (Windows BITMAPINFOHEADER)
+        writer.write_all(&40u32.to_le_bytes())?; // DIB header size
+        writer.write_all(&self.width.to_le_bytes())?;
+        writer.write_all(&self.height.to_le_bytes())?;
+        writer.write_all(&1u16.to_le_bytes())?; // Number of color planes
+        writer.write_all(&24u16.to_le_bytes())?; // Bits per pixel
+        writer.write_all(&0u32.to_le_bytes())?; // Compression
+        writer.write_all(&img_section_size.to_le_bytes())?;
+        writer.write_all(&72u32.to_le_bytes())?; // Vertical pixel/meter
+        writer.write_all(&72u32.to_le_bytes())?; // Horizontal pixel/meter
+        writer.write_all(&0u32.to_le_bytes())?; // Doesn't matter
+        writer.write_all(&0u32.to_le_bytes())?; // Doesn't matter
+
+        // IMG Data
+        for y in (0..self.height as usize).rev() {
+            // Iterating line by line, starting from the bottom
+            let row_start = y * self.width as usize;
+            let row_end = row_start + self.width as usize;
+            for p in &self.pixels[row_start..row_end] {
+                writer.write_all(&[p.b, p.g, p.r])?;
+            }
+
+            for _ in 0..row_padding {
+                writer.write_all(&[0u8])?;
+            }
+        }
+
+        writer.flush()?;
+        Ok(())
+    }
+
+    ///Saves the image to the desired location as a P6 .ppm or .bmp file based on the path
+    pub fn save_to_file(&self, path: &Path) -> Result<(), ImageError> {
+        if let Some(ext) = path.extension() {
+            if ext == "ppm" {
+                return self.save_to_file_p6_ppm(path);
+            } else if ext == "bmp" {
+                return self.save_to_file_bmp(path);
+            }
+        }
+
+        Err(ImageError::UnsupportedDestinationFileType)
     }
 
     #[inline]
