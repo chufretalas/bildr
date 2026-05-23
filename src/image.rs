@@ -288,16 +288,11 @@ impl Image {
         writeln!(writer, "{} {}", self.width, self.height)?;
         writeln!(writer, "255")?;
 
-        let mut flat_pixels = Vec::with_capacity(self.pixels.len() * 3);
+        for p in &self.pixels {
+            writer.write_all(&[p.r, p.g, p.b])?;
+        }
 
-        self.pixels.iter().for_each(|p| {
-            flat_pixels.push(p.r);
-            flat_pixels.push(p.g);
-            flat_pixels.push(p.b);
-        });
-
-        writer.write_all(&flat_pixels)?;
-
+        writer.flush()?;
         Ok(())
     }
 
