@@ -1,6 +1,6 @@
 use std::{
     fs::File,
-    io::{BufReader, BufWriter, Read, Write},
+    io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write},
     path::Path,
 };
 
@@ -32,6 +32,12 @@ pub enum ImageError {
 
     #[error("The only supported files types are PPM (.ppm) and BITMAP (.bmp)")]
     UnsupportedDestinationFileType,
+
+    #[error("The only supported files types are PPM (.ppm) and BITMAP (.bmp)")]
+    UnsupportedSourceFileType,
+
+    #[error("Unsupported bitmap found while reading the file: {0}")]
+    UnsupportedBitmapFormat(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -153,7 +159,7 @@ impl Image {
         }
     }
 
-    pub fn from_file_path(path: &Path) -> Result<Self, ImageError> {
+    fn from_file_path_ppm(path: &Path) -> Result<Self, ImageError> {
         //TODO: skip comments in the header
         let file = File::open(path)?;
 
@@ -282,6 +288,102 @@ impl Image {
         }
 
         Ok(img)
+    }
+
+    fn from_file_path_bmp(path: &Path) -> Result<Self, ImageError> {
+        // bmp reference: https://en.wikipedia.org/wiki/BMP_file_format
+
+        let file = File::open(path)?;
+
+        // Read buffers
+        let mut buf2b = [0u8; 2];
+        let mut buf3b = [0u8; 3];
+        let mut buf4b = [0u8; 4];
+
+        let mut reader = BufReader::new(file);
+
+        // Reading the magic number
+        reader.read_exact(&mut buf2b)?;
+        if buf2b != *b"BM" {
+            return Err(ImageError::UnsupportedBitmapFormat(format!(
+                "Expected \"BM\" in magic number/header field, found \"{:?}\"",
+                String::from_utf8(buf2b.to_vec())
+            )));
+        }
+
+        // Get pixel data offset
+        reader.seek(SeekFrom::Start(10))?;
+
+        reader.read_exact(&mut buf4b)?;
+        let pixel_data_offset = u32::from_le_bytes(buf4b);
+
+        // jump into width
+        reader.seek(SeekFrom::Start(18))?;
+
+        reader.read_exact(&mut buf4b)?;
+        let width = u32::from_le_bytes(buf4b);
+
+        reader.read_exact(&mut buf4b)?;
+        let height = u32::from_le_bytes(buf4b);
+
+        // jump over color plane
+        reader.seek(SeekFrom::Current(2))?;
+
+        reader.read_exact(&mut buf2b)?;
+        let bytes_per_pixel = u16::from_le_bytes(buf2b);
+        if bytes_per_pixel != 24 {
+            return Err(ImageError::UnsupportedBitmapFormat(format!(
+                "Expected 24 in bytes per pixel, found {}",
+                bytes_per_pixel
+            )));
+        }
+
+        reader.read_exact(&mut buf4b)?;
+        let compression_type = u32::from_le_bytes(buf4b);
+        if compression_type != 0 {
+            return Err(ImageError::UnsupportedBitmapFormat(format!(
+                "Expected 0 (no compression) in compression type, found {}",
+                compression_type
+            )));
+        }
+
+        // jumpt into pixel data
+        reader.seek(SeekFrom::Start(pixel_data_offset as u64))?;
+
+        let mut img = Self::black(width, height);
+
+        let row_padding = (4 - (width * 3) % 4) % 4;
+
+        // Iterating line by line, starting from the bottom
+        for y in (0..height).rev() {
+            for x in 0..width {
+                reader.read_exact(&mut buf3b)?;
+
+                img.set_pixel(
+                    x as i32,
+                    y as i32,
+                    Pixel::from_rgb(buf3b[2], buf3b[1], buf3b[0]),
+                )?
+            }
+
+            if row_padding > 0 {
+                reader.seek(SeekFrom::Current(row_padding as i64))?;
+            }
+        }
+
+        Ok(img)
+    }
+
+    pub fn from_file_path(path: &Path) -> Result<Self, ImageError> {
+        if let Some(ext) = path.extension() {
+            if ext == "ppm" {
+                return Self::from_file_path_ppm(path);
+            } else if ext == "bmp" {
+                return Self::from_file_path_bmp(path);
+            }
+        }
+
+        Err(ImageError::UnsupportedSourceFileType)
     }
 
     fn save_to_file_p6_ppm(&self, path: &Path) -> Result<(), ImageError> {
@@ -527,5 +629,52 @@ mod tests {
             "Should have failed with UnsupportedDepth for '65535', but got: {:?}",
             err
         );
+    }
+
+    #[test]
+    fn test_bmp_round_trip() {
+        // 1. Load the golden PPM reference
+        let ppm_path = get_test_image_path("6x3_p3.ppm");
+        let ppm_img = Image::from_file_path(&ppm_path).expect("Failed to load reference PPM image");
+
+        // 2. Generate a temporary path for the BMP file
+        let temp_bmp_path =
+            env::temp_dir().join(format!("test_roundtrip_{}.bmp", std::process::id()));
+
+        // 3. Save the loaded PPM as a BMP
+        ppm_img
+            .save_to_file(&temp_bmp_path)
+            .expect("Failed to save image as BMP");
+
+        // 4. Load the newly created BMP file
+        let bmp_img =
+            Image::from_file_path(&temp_bmp_path).expect("Failed to load generated BMP image");
+
+        // 5. Compare the metadata
+        assert_eq!(
+            ppm_img.width(),
+            bmp_img.width(),
+            "Width mismatch after BMP round-trip!"
+        );
+        assert_eq!(
+            ppm_img.height(),
+            bmp_img.height(),
+            "Height mismatch after BMP round-trip!"
+        );
+
+        // 6. Compare every single pixel
+        for y in 0..ppm_img.height() {
+            for x in 0..ppm_img.width() {
+                let p1 = ppm_img.get_pixel(x as i32, y as i32).unwrap();
+                let p2 = bmp_img.get_pixel(x as i32, y as i32).unwrap();
+
+                assert_eq!(p1.r, p2.r, "Red channel mismatch at pixel ({}, {})", x, y);
+                assert_eq!(p1.g, p2.g, "Green channel mismatch at pixel ({}, {})", x, y);
+                assert_eq!(p1.b, p2.b, "Blue channel mismatch at pixel ({}, {})", x, y);
+            }
+        }
+
+        // Clean up the temporary file
+        let _ = fs::remove_file(temp_bmp_path);
     }
 }
